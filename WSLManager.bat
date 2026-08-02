@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 :: WSLManager.bat - WSL 发行版管理工具启动器
 :: 自动请求管理员权限后启动 PowerShell 模块
 
