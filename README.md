@@ -28,10 +28,10 @@ WSLManager\
 ```
 
 ## 使用方法
-
-1. 双击 `WSLManager.bat` 启动工具
-2. 工具会自动请求管理员权限
-3. 在菜单中选择相应功能进行操作
+1. 首次运行可自定义存放WSLManager目录，推荐使用英文路径
+2. 双击 `WSLManager.bat` 启动工具，会自动创建Config/、Repositories/、Instances/、Backups/、Temp/目录
+3. 工具会自动请求管理员权限
+4. 在菜单中选择相应功能进行操作
 
 ## 配置说明
 

@@ -216,8 +216,7 @@ function New-WSLInstanceFromStore {
     Write-Host ""
 
     # 获取可安装发行版列表
-    $distroList = wsl -l -o 2>&1
-    Write-Host $distroList
+    wsl -l -o 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
 
     Write-Host ""
     $distroName = Read-Host "请输入要安装的发行版名称"
@@ -230,8 +229,8 @@ function New-WSLInstanceFromStore {
 
     Write-Host "`n正在安装 '$distroName'，请稍候..." -ForegroundColor Cyan
 
-    # 安装发行版到系统默认位置
-    wsl --install -d $distroName 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
+    # 安装发行版到系统默认位置（直接输出，保留原生进度条）
+    wsl --install -d $distroName
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host "`n安装失败，请检查发行版名称是否正确。" -ForegroundColor Red
@@ -246,7 +245,7 @@ function New-WSLInstanceFromStore {
     Ensure-Directory $repositoriesPath
 
     # 导出为母版 tar 文件
-    wsl --export $distroName (Join-Path $repositoriesPath "base.tar") 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
+    wsl --export $distroName (Join-Path $repositoriesPath "base.tar")
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host "`n导出母版失败，正在清理残留实例..." -ForegroundColor Yellow
@@ -290,11 +289,11 @@ function New-WSLInstanceFromStore {
     $version = $config.DefaultWSLVersion
 
     Write-Host "`n正在导入实例 '$instanceName'..." -ForegroundColor Cyan
-    wsl --import $instanceName $instancesPath (Join-Path $repositoriesPath "base.tar") --version $version 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
+    wsl --import $instanceName $instancesPath (Join-Path $repositoriesPath "base.tar") --version $version
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host "`n导入失败，尝试从母版恢复..." -ForegroundColor Yellow
-        wsl --import $instanceName $instancesPath (Join-Path $repositoriesPath "base.tar") --version $version 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
+        wsl --import $instanceName $instancesPath (Join-Path $repositoriesPath "base.tar") --version $version
         if ($LASTEXITCODE -ne 0) {
             Write-Host "恢复失败，请手动处理。母版文件保存在: $(Join-Path $repositoriesPath "base.tar")" -ForegroundColor Red
         } else {
@@ -388,7 +387,7 @@ function New-WSLInstanceFromRepo {
     $version = $config.DefaultWSLVersion
 
     Write-Host "`n正在导入实例 '$instanceName'..." -ForegroundColor Cyan
-    wsl --import $instanceName $instancesPath $selected.Tar --version $version 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
+    wsl --import $instanceName $instancesPath $selected.Tar --version $version
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host "`n导入实例失败。" -ForegroundColor Red
@@ -462,7 +461,7 @@ function New-WSLInstanceFromTar {
     $version = $config.DefaultWSLVersion
 
     Write-Host "`n正在导入实例 '$instanceName'..." -ForegroundColor Cyan
-    wsl --import $instanceName $instancesPath $destTar --version $version 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
+    wsl --import $instanceName $instancesPath $destTar --version $version
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host "`n导入实例失败。" -ForegroundColor Red
@@ -532,7 +531,7 @@ function Backup-WSLInstance {
     }
 
     # 执行备份
-    wsl --export $selectedInstance $backupFile 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
+    wsl --export $selectedInstance $backupFile
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host "`n备份失败。" -ForegroundColor Red
@@ -660,7 +659,7 @@ function Restore-WSLInstance {
         $version = $config.DefaultWSLVersion
 
         Write-Host "`n正在从备份还原 '$targetInstance'..." -ForegroundColor Cyan
-        wsl --import $targetInstance $instancesPath $selected.Path --version $version 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
+        wsl --import $targetInstance $instancesPath $selected.Path --version $version
 
         if ($LASTEXITCODE -ne 0) {
             Write-Host "`n还原失败。" -ForegroundColor Red
@@ -693,7 +692,7 @@ function Restore-WSLInstance {
         $version = $config.DefaultWSLVersion
 
         Write-Host "`n正在导入新实例 '$newInstanceName'..." -ForegroundColor Cyan
-        wsl --import $newInstanceName $instancesPath $selected.Path --version $version 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
+        wsl --import $newInstanceName $instancesPath $selected.Path --version $version
 
         if ($LASTEXITCODE -ne 0) {
             Write-Host "`n导入失败。" -ForegroundColor Red
