@@ -12,14 +12,6 @@ $script:Config = $null
 $script:RootPath = Split-Path -Parent $PSScriptRoot
 $script:ConfigPath = Join-Path $script:RootPath "Config\config.json"
 
-# 颜色常量，统一使用 ANSI 颜色码，确保 PowerShell 5.1 兼容
-$script:ColorCyan    = "`e[96m"
-$script:ColorYellow  = "`e[33m"
-$script:ColorRed     = "`e[91m"
-$script:ColorGreen   = "`e[92m"
-$script:ColorBold    = "`e[1m"
-$script:ColorReset   = "`e[0m"
-
 # ========== 3. 配置管理函数 ==========
 
 <#
@@ -43,13 +35,15 @@ function Get-WSLConfig {
         $script:Config = $content | ConvertFrom-Json
     }
     catch {
-        Write-Warning "配置文件读取失败，将使用默认配置"
+        Write-Warning "配置文件损坏，将使用默认配置并重建文件"
         $script:Config = [PSCustomObject]@{
             WSLRoot              = ""
             DefaultWSLVersion    = 2
             AutoCleanTempDays    = 3
             BackupRetentionCount = 5
         }
+        # 重建配置文件
+        $script:Config | ConvertTo-Json -Depth 3 | Out-File -FilePath $script:ConfigPath -Encoding UTF8
     }
 
     return $script:Config
@@ -87,9 +81,14 @@ function Get-WSLRoot {
     $config = Get-WSLConfig
     $wslRoot = $config.WSLRoot
 
-    # 若配置了 WSLRoot 且路径有效，则使用配置路径
-    if (-not [string]::IsNullOrWhiteSpace($wslRoot) -and (Test-Path $wslRoot)) {
-        return $wslRoot
+    # 若配置了 WSLRoot，使用配置路径并自动创建目录
+    if (-not [string]::IsNullOrWhiteSpace($wslRoot)) {
+        try {
+            Ensure-Directory $wslRoot
+            return $wslRoot
+        } catch {
+            Write-Warning "无法创建自定义根目录 '$wslRoot'，将回退到脚本所在目录。错误: $($_.Exception.Message)"
+        }
     }
 
     # 默认回退到脚本所在目录（确保完全可移植）
@@ -109,19 +108,6 @@ function Ensure-Directory {
     }
 }
 
-<#
-.SYNOPSIS
-    获取所有子目录路径
-.PARAMETER basePath
-    基础目录路径
-#>
-function Get-SubDirectories {
-    param([string]$basePath)
-    if (Test-Path $basePath) {
-        Get-ChildItem -Path $basePath -Directory | ForEach-Object { $_.FullName }
-    }
-}
-
 # ========== 5. 核心功能函数 ==========
 
 <#
@@ -134,16 +120,16 @@ function Show-Menu {
     while ($true) {
         Clear-Host
         Write-Host ""
-        Write-Host ("========================================" -f $script:ColorCyan)
-        Write-Host ("    WSL 发行版管理工具 v1.0" -f $script:ColorCyan)
-        Write-Host ("========================================" -f $script:ColorCyan)
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host "    WSL 发行版管理工具 v1.0" -ForegroundColor Cyan
+        Write-Host "========================================" -ForegroundColor Cyan
         Write-Host "  1. 列出所有已安装的发行版"
         Write-Host "  2. 新增发行版"
         Write-Host "  3. 备份发行版"
         Write-Host "  4. 还原发行版"
         Write-Host "  5. 删除发行版"
         Write-Host "  6. 退出"
-        Write-Host ("========================================" -f $script:ColorCyan)
+        Write-Host "========================================" -ForegroundColor Cyan
 
         $choice = Read-Host "请输入您的选择 (1-6)"
 
@@ -159,7 +145,7 @@ function Show-Menu {
             }
             default {
                 Write-Host "`n无效选择，请重新输入。" -ForegroundColor Yellow
-                Start-Sleep -Seconds 1
+                Start-Sleep -Seconds 2
             }
         }
     }
@@ -194,13 +180,13 @@ function List-Instances {
 function New-WSLInstance {
     Clear-Host
     Write-Host ""
-    Write-Host ("新增发行版" -f $script:ColorCyan)
-    Write-Host ("========================================" -f $script:ColorCyan)
+    Write-Host "新增发行版" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
     Write-Host "  1. 从微软官方在线商店下载"
     Write-Host "  2. 从本地母版仓库创建"
     Write-Host "  3. 从自定义 .tar 文件导入"
     Write-Host "  0. 返回主菜单"
-    Write-Host ("========================================" -f $script:ColorCyan)
+    Write-Host "========================================" -ForegroundColor Cyan
 
     $sourceChoice = Read-Host "请选择来源 (0-3)"
 
@@ -262,7 +248,9 @@ function New-WSLInstanceFromStore {
     wsl --export $distroName (Join-Path $repositoriesPath "base.tar") 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
 
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "`n导出母版失败。" -ForegroundColor Red
+        Write-Host "`n导出母版失败，正在清理残留实例..." -ForegroundColor Yellow
+        wsl --unregister $distroName 2>&1 | Out-Null
+        Write-Host "安装失败，已清理。" -ForegroundColor Red
         Pause-And-Return
         return
     }
@@ -272,12 +260,25 @@ function New-WSLInstanceFromStore {
     # 注销默认实例
     Write-Host "`n正在注销默认实例..." -ForegroundColor Cyan
     wsl --unregister $distroName 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "注销默认实例失败，请手动处理。" -ForegroundColor Red
+        Pause-And-Return
+        return
+    }
 
     # 提示用户输入新实例名称
     Write-Host ""
     $instanceName = Read-Host "请输入新实例名称（默认: $distroName，直接回车使用默认）"
     if ([string]::IsNullOrWhiteSpace($instanceName)) {
         $instanceName = $distroName
+    }
+
+    # 检查实例名是否已存在
+    $existingInstances = wsl -l -q 2>&1 | Where-Object { $_ -match '\S' } | ForEach-Object { $_.Trim() }
+    if ($instanceName -in $existingInstances) {
+        Write-Host "`n实例名 '$instanceName' 已存在，请选择其他名称。" -ForegroundColor Red
+        Pause-And-Return
+        return
     }
 
     # 确保实例目录存在
@@ -291,7 +292,13 @@ function New-WSLInstanceFromStore {
     wsl --import $instanceName $instancesPath (Join-Path $repositoriesPath "base.tar") --version $version 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
 
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "`n导入实例失败。" -ForegroundColor Red
+        Write-Host "`n导入失败，尝试从母版恢复..." -ForegroundColor Yellow
+        wsl --import $instanceName $instancesPath (Join-Path $repositoriesPath "base.tar") --version $version 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "恢复失败，请手动处理。母版文件保存在: $(Join-Path $repositoriesPath "base.tar")" -ForegroundColor Red
+        } else {
+            Write-Host "`n发行版 '$instanceName' 恢复成功！" -ForegroundColor Green
+        }
     } else {
         Write-Host "`n发行版 '$instanceName' 创建成功！" -ForegroundColor Green
     }
@@ -364,6 +371,14 @@ function New-WSLInstanceFromRepo {
         $instanceName = $defaultName
     }
 
+    # 检查实例名是否已存在
+    $existingInstances = wsl -l -q 2>&1 | Where-Object { $_ -match '\S' } | ForEach-Object { $_.Trim() }
+    if ($instanceName -in $existingInstances) {
+        Write-Host "`n实例名 '$instanceName' 已存在，请选择其他名称。" -ForegroundColor Red
+        Pause-And-Return
+        return
+    }
+
     # 确保实例目录存在
     $instancesPath = Join-Path (Get-WSLRoot) "Instances\$instanceName"
     Ensure-Directory $instancesPath
@@ -430,6 +445,14 @@ function New-WSLInstanceFromTar {
         $instanceName = $defaultName
     }
 
+    # 检查实例名是否已存在
+    $existingInstances = wsl -l -q 2>&1 | Where-Object { $_ -match '\S' } | ForEach-Object { $_.Trim() }
+    if ($instanceName -in $existingInstances) {
+        Write-Host "`n实例名 '$instanceName' 已存在，请选择其他名称。" -ForegroundColor Red
+        Pause-And-Return
+        return
+    }
+
     # 确保实例目录存在
     $instancesPath = Join-Path (Get-WSLRoot) "Instances\$instanceName"
     Ensure-Directory $instancesPath
@@ -461,7 +484,7 @@ function Backup-WSLInstance {
     Write-Host "正在获取已安装的发行版列表..." -ForegroundColor Cyan
 
     # 获取所有已安装实例
-    $instances = wsl -l -q 2>&1 | Where-Object { $_ -match '^[0-9a-zA-Z_-]+$' } | ForEach-Object { $_.Trim() }
+    $instances = wsl -l -q 2>&1 | Where-Object { $_ -match '\S' } | ForEach-Object { $_.Trim() }
 
     if ($instances.Count -eq 0) {
         Write-Host "`n没有发现已安装的 WSL 发行版。" -ForegroundColor Yellow
@@ -492,9 +515,11 @@ function Backup-WSLInstance {
     Ensure-Directory $backupDir
     $backupFile = Join-Path $backupDir "full_${timestamp}.tar"
 
-    # 备份前检查磁盘空间
-    $drive = $env:SystemDrive.Substring(0, 2)
-    $freeSpace = (Get-PSDrive $drive).Free / 1GB
+    # 备份前检查备份目录所在驱动器的磁盘空间
+    $backupRoot = Join-Path (Get-WSLRoot) "Backups"
+    $driveName = [System.IO.Path]::GetPathRoot($backupRoot)
+    $driveInfo = Get-PSDrive -Name $driveName.TrimEnd('\')
+    $freeSpace = $driveInfo.Free / 1GB
     if ($freeSpace -lt 5) {
         Write-Host "`n警告：磁盘可用空间不足 5GB（当前约 $([math]::Round($freeSpace, 2))GB），备份可能失败。" -ForegroundColor Yellow
         $confirm = Read-Host "是否继续备份？(y/n)"
@@ -561,7 +586,6 @@ function Restore-WSLInstance {
 
     # 收集所有备份文件
     $allBackups = @()
-    $backupDirInfo = @{}
 
     Get-ChildItem -Path $backupsPath -Directory | ForEach-Object {
         $instanceName = $_.Name
@@ -583,6 +607,9 @@ function Restore-WSLInstance {
         Pause-And-Return
         return
     }
+
+    # 按时间降序排列，最新备份优先显示
+    $allBackups = $allBackups | Sort-Object -Property Time -Descending
 
     Write-Host "`n可用的备份文件：" -ForegroundColor Cyan
     for ($i = 0; $i -lt $allBackups.Count; $i++) {
@@ -612,8 +639,17 @@ function Restore-WSLInstance {
         # 覆盖原实例
         $targetInstance = $selected.InstanceName
 
-        Write-Host "`n正在注销原实例 '$targetInstance'..." -ForegroundColor Cyan
+        Write-Host "`n正在停止实例 '$targetInstance'..." -ForegroundColor Cyan
+        wsl -t $targetInstance 2>&1 | Out-Null
+        Start-Sleep -Seconds 1
+
+        Write-Host "正在注销原实例 '$targetInstance'..." -ForegroundColor Cyan
         wsl --unregister $targetInstance 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "注销原实例失败，无法继续还原。" -ForegroundColor Red
+            Pause-And-Return
+            return
+        }
 
         # 重新创建实例目录
         $instancesPath = Join-Path (Get-WSLRoot) "Instances\$targetInstance"
@@ -637,6 +673,14 @@ function Restore-WSLInstance {
 
         if ([string]::IsNullOrWhiteSpace($newInstanceName)) {
             Write-Host "`n实例名称不能为空。" -ForegroundColor Yellow
+            Pause-And-Return
+            return
+        }
+
+        # 检查实例名是否已存在
+        $existingInstances = wsl -l -q 2>&1 | Where-Object { $_ -match '\S' } | ForEach-Object { $_.Trim() }
+        if ($newInstanceName -in $existingInstances) {
+            Write-Host "`n实例名 '$newInstanceName' 已存在，请选择其他名称。" -ForegroundColor Red
             Pause-And-Return
             return
         }
@@ -671,13 +715,13 @@ function Restore-WSLInstance {
 function Remove-WSLInstance {
     Clear-Host
     Write-Host ""
-    Write-Host ("删除发行版" -f $script:ColorRed)
-    Write-Host ("========================================" -f $script:ColorRed)
+    Write-Host "删除发行版" -ForegroundColor Red
+    Write-Host "========================================" -ForegroundColor Red
     Write-Host "  警告：此操作不可恢复！" -ForegroundColor Red
 
     # 获取所有已安装实例
     Write-Host "`n正在获取已安装的发行版列表..." -ForegroundColor Cyan
-    $instances = wsl -l -q 2>&1 | Where-Object { $_ -match '^[0-9a-zA-Z_-]+$' } | ForEach-Object { $_.Trim() }
+    $instances = wsl -l -q 2>&1 | Where-Object { $_ -match '\S' } | ForEach-Object { $_.Trim() }
 
     if ($instances.Count -eq 0) {
         Write-Host "`n没有发现已安装的 WSL 发行版。" -ForegroundColor Yellow
@@ -701,10 +745,10 @@ function Remove-WSLInstance {
 
     $targetInstance = $instances[[int]$choice - 1]
     Write-Host ""
-    Write-Host ("========================================" -f $script:ColorRed)
-    Write-Host ("  即将删除实例: $targetInstance" -f $script:ColorRed)
-    Write-Host ("  此操作将永久删除该实例及其数据！" -f $script:ColorRed)
-    Write-Host ("========================================" -f $script:ColorRed)
+    Write-Host "========================================" -ForegroundColor Red
+    Write-Host "  即将删除实例: $targetInstance" -ForegroundColor Red
+    Write-Host "  此操作将永久删除该实例及其数据！" -ForegroundColor Red
+    Write-Host "========================================" -ForegroundColor Red
 
     # 二次确认：输入完整实例名称
     $confirmName = Read-Host "请输入实例完整名称以确认删除"
@@ -727,12 +771,18 @@ function Remove-WSLInstance {
     $wslRoot = Get-WSLRoot
     $success = $true
 
-    # 步骤 1：注销 WSL 实例（所有选项都执行）
-    Write-Host "`n[1/4] 正在注销 WSL 实例 '$targetInstance'..." -ForegroundColor Cyan
+    # 步骤 1：先停止实例，再注销（所有选项都执行）
+    Write-Host "`n[1/4] 正在停止实例 '$targetInstance'..." -ForegroundColor Cyan
+    wsl -t $targetInstance 2>&1 | Out-Null
+    Start-Sleep -Seconds 1
+
+    Write-Host "[1/4] 正在注销 WSL 实例 '$targetInstance'..." -ForegroundColor Cyan
     wsl --unregister $targetInstance 2>&1 | Out-String | ForEach-Object { Write-Host $_ }
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "  注销实例失败。" -ForegroundColor Red
-        $success = $false
+        Write-Host "  注销实例失败，停止后续清理操作。" -ForegroundColor Red
+        Write-Host "  请手动检查实例状态。" -ForegroundColor Yellow
+        Pause-And-Return
+        return
     } else {
         Write-Host "  实例已注销。" -ForegroundColor Green
     }
@@ -742,8 +792,8 @@ function Remove-WSLInstance {
         $backupDir = Join-Path $wslRoot "Backups\$targetInstance"
         if (Test-Path $backupDir) {
             Write-Host "`n[2/4] 正在删除备份目录: $backupDir" -ForegroundColor Cyan
-            Remove-Item $backupDir -Recurse -Force
-            if ($LASTEXITCODE -eq 0) {
+            Remove-Item $backupDir -Recurse -Force -ErrorAction SilentlyContinue
+            if ($?) {
                 Write-Host "  备份目录已删除。" -ForegroundColor Green
             } else {
                 Write-Host "  删除备份目录失败。" -ForegroundColor Red
@@ -756,19 +806,42 @@ function Remove-WSLInstance {
 
     # 步骤 3：删除母版（选项 3, 4）
     if ($cleanupChoice -in "3", "4") {
-        # 根据实例名推断母版名（去掉可能的后缀）
-        $repoDir = Join-Path $wslRoot "Repositories\$targetInstance"
-        if (Test-Path $repoDir) {
+        # 扫描 Repositories 下所有子目录，模糊匹配实例名对应的母版
+        $repoCandidates = Get-ChildItem -Path (Join-Path $wslRoot "Repositories") -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $targetInstance -like "$($_.Name)*" -or $_.Name -like "$targetInstance*" }
+
+        if ($repoCandidates.Count -eq 0) {
+            Write-Host "`n[3/4] 未找到匹配的母版，跳过。" -ForegroundColor Gray
+        } elseif ($repoCandidates.Count -eq 1) {
+            $repoDir = $repoCandidates[0].FullName
             Write-Host "`n[3/4] 正在删除母版目录: $repoDir" -ForegroundColor Cyan
-            Remove-Item $repoDir -Recurse -Force
-            if ($LASTEXITCODE -eq 0) {
+            Remove-Item $repoDir -Recurse -Force -ErrorAction SilentlyContinue
+            if ($?) {
                 Write-Host "  母版目录已删除。" -ForegroundColor Green
             } else {
                 Write-Host "  删除母版目录失败。" -ForegroundColor Red
                 $success = $false
             }
         } else {
-            Write-Host "`n[3/4] 母版目录不存在，跳过。" -ForegroundColor Gray
+            Write-Host "`n[3/4] 找到多个匹配的母版：" -ForegroundColor Yellow
+            for ($j = 0; $j -lt $repoCandidates.Count; $j++) {
+                Write-Host "  [$($j + 1)] $($repoCandidates[$j].Name)"
+            }
+            Write-Host "  [0] 跳过"
+            $repoChoice = Read-Host "请选择要删除的母版编号"
+            if ($repoChoice -match '^\d+$' -and [int]$repoChoice -ge 1 -and [int]$repoChoice -le $repoCandidates.Count) {
+                $repoDir = $repoCandidates[[int]$repoChoice - 1].FullName
+                Write-Host "正在删除母版目录: $repoDir" -ForegroundColor Cyan
+                Remove-Item $repoDir -Recurse -Force -ErrorAction SilentlyContinue
+                if ($?) {
+                    Write-Host "  母版目录已删除。" -ForegroundColor Green
+                } else {
+                    Write-Host "  删除母版目录失败。" -ForegroundColor Red
+                    $success = $false
+                }
+            } else {
+                Write-Host "  已跳过母版删除。" -ForegroundColor Gray
+            }
         }
     }
 
@@ -777,8 +850,8 @@ function Remove-WSLInstance {
         $instanceDir = Join-Path $wslRoot "Instances\$targetInstance"
         if (Test-Path $instanceDir) {
             Write-Host "`n[4/4] 正在删除实例目录: $instanceDir" -ForegroundColor Cyan
-            Remove-Item $instanceDir -Recurse -Force
-            if ($LASTEXITCODE -eq 0) {
+            Remove-Item $instanceDir -Recurse -Force -ErrorAction SilentlyContinue
+            if ($?) {
                 Write-Host "  实例目录已删除。" -ForegroundColor Green
             } else {
                 Write-Host "  删除实例目录失败。" -ForegroundColor Red
@@ -821,20 +894,6 @@ function Format-FileSize {
 
 <#
 .SYNOPSIS
-    从 .tar 文件名推断发行版名称
-#>
-function Get-DistroNameFromTar {
-    param([string]$tarPath)
-    $name = [System.IO.Path]::GetFileNameWithoutExtension($tarPath)
-    # 移除常见的时间戳后缀（如 _20240101）
-    if ($name -match '^(.+)_\d{8}$') {
-        return $matches[1]
-    }
-    return $name
-}
-
-<#
-.SYNOPSIS
     暂停并返回主菜单
 #>
 function Pause-And-Return {
@@ -864,7 +923,7 @@ function Clean-TempFiles {
         try {
             Remove-Item $file.FullName -Force
         } catch {
-            # 忽略删除失败的文件
+            Write-Warning "无法删除临时文件: $($file.FullName) - $($_.Exception.Message)"
         }
     }
 }
