@@ -1,4 +1,4 @@
-# WSLManager.psm1
+﻿# WSLManager.psm1
 # WSL 发行版管理工具核心模块
 # 提供新增、备份、还原、删除 WSL 发行版的完整功能
 # 兼容 PowerShell 5.1（Windows 10/11 默认版本）
@@ -9,7 +9,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 
 # ========== 2. 全局变量定义 ==========
 $script:Config = $null
-$script:RootPath = Split-Path -Parent $PSScriptRoot
+$script:RootPath = $PSScriptRoot
 $script:ConfigPath = Join-Path $script:RootPath "Config\config.json"
 
 # ========== 3. 配置管理函数 ==========
@@ -204,9 +204,10 @@ function New-WSLInstance {
 
 <#
 .SYNOPSIS
-    从微软官方商店安装发行版
+    Install a WSL distro from the Microsoft Store.
 .DESCRIPTION
-    列出可安装的发行版，用户选择后安装、导出为母版、注销并重新导入
+    Lists available distros, user selects one, installs it, exports as repo template,
+    unregisters the default instance, then re-imports to managed location.
 #>
 function New-WSLInstanceFromStore {
     Clear-Host
