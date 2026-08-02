@@ -1,0 +1,35 @@
+# === WSLManager Runtime Directories ===
+# Auto-created on first run; contain user data and WSL instances
+Config/
+Repositories/
+Instances/
+Backups/
+Temp/
+
+# === Project Docs (local only) ===
+提示词.md
+WSL 发行版管理工具 - 设计大纲.md
+
+# === PowerShell ===
+# Generated profile/script files
+*.ps1.xml
+*.psm1.xml
+*.psd1.xml
+
+# === Windows ===
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# === Editor ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === macOS (if repo is cloned on Mac) ===
+.DS_Store
+
+# === Linux ===
+*~
