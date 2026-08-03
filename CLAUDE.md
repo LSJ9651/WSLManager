@@ -22,10 +22,24 @@ Config/config.json   → User preferences (auto-created on first run)
 
 **Key design principle**: `.tar` for template storage (space-efficient), `.vhdx` for running instances (performance-optimal).
 
+## Open Source & Release
+
+- **License**: MIT (2026, LSJ) — `LICENSE` must ship in every release zip
+- **Repo**: PUBLIC at `LSJ9651/WSLManager`, default branch `master`, topics: `wsl`, `powershell`, `windows`, `wsl2`, `cli`
+- **Version sync**: the version in the `Show-Menu` header (`WSL 发行版管理工具 v1.0`, ~line 124) is **hardcoded**. When cutting a release, bump the header, the git tag, and the Release notes together — all three must agree
+- **Release zip contents**: ONLY `WSLManager.bat`, `WSLManager.psm1`, `README.md`, `LICENSE`. NEVER package `Config/config.json` or `Backups/` — they hold personal data (config.json is the user's gitignored default config; Backups/ may contain real backups). Runtime dirs are recreated on first launch, so they don't belong in the zip either
+- **`docs/` is gitignored** (local-only design docs, e.g. 设计大纲) — don't reference it for anything user-facing
+- **Commit messages**: Chinese, consistent with existing history
+- **README is the user contract**: its 功能说明 / 配置说明 / 安全说明 / 注意事项 sections must be updated in the same change as any behavior change
+
+### Security claims (must not regress)
+README's 安全说明 makes auditable promises: **no network access, no registry / scheduled-task / service writes, only talks to WSL via official commands and touches files under tool-owned dirs**. Any new feature that would break these claims (auto-update, telemetry, external paths) must update that README section in the same PR — do not silently invalidate the documented guarantees.
+
 ## File Encoding (Critical)
 
 - **`.psm1` / `.ps1`**: LF line endings + UTF-8 with BOM — PowerShell 5.1 will NOT parse UTF-8 correctly without BOM, mangling Chinese characters and corrupting syntax (`#>` comment terminators become `?>`)
 - **`.bat` / `.cmd`**: CRLF line endings + UTF-8 with BOM
+- **`.md`** (README.md etc.): UTF-8 **without** BOM — Markdown is fine without BOM, unlike `.psm1`
 
 ## Commands
 
@@ -65,6 +79,8 @@ python -c "t=open('<repo>/WSLManager.psm1','rb').read().decode('utf-8-sig');prin
 - **After `wsl --unregister`**: Check `$LASTEXITCODE` — if it fails, abort all subsequent cleanup to prevent orphan instances
 - **`wsl --import` failure after unregister**: Data is already lost at this point. Implement a retry from the template, and warn the user that the template file is preserved at the saved path
 - **Instance name collision**: Check `wsl -l -q` before importing in ALL creation paths (from store, from repo, from tar, from backup restore)
+- **Store install flow** (`New-WSLInstanceFromStore`): install with `wsl --install -d <name> --no-launch` (avoids auto-entering Linux and stalling the script) → export template → `wsl --unregister` the default instance → re-import to managed location. If `--install` fails, the whole flow aborts BEFORE any unregister (no data lost); if template export fails, unregister the installed distro to clean up
+- **Name-collision retry**: in creation flows, instance-name validation uses a `do { read; if name taken → null } while (empty)` loop, NOT a one-shot check-and-return (Store) — keep the retry so an invalid name can't strand an already-unregistered distro
 
 ### Backup/Restore Safety
 - Disk space check must target the drive of the backup directory (`GetPathRoot`), NOT `$env:SystemDrive`
@@ -80,3 +96,16 @@ python -c "t=open('<repo>/WSLManager.psm1','rb').read().decode('utf-8-sig');prin
 - `chcp 65001 >nul 2>&1` (NOT `/dev/null` — Windows doesn't have it)
 - Use `;` as statement separator in PowerShell `-Command` (NOT `,` — comma is array operator)
 - Path variable: strip trailing backslash before passing to avoid `\"` escaping through double quotes
+
+## WSL Commands in Use
+
+| Command | Purpose | Where |
+| --- | --- | --- |
+| `wsl -l -v` | List instances w/ status | List-Instances |
+| `wsl -l -o` | List online distros | New-WSLInstanceFromStore |
+| `wsl -l -q` | Silent name list (NUL-strip pattern!) | Backup / Restore / Remove / name checks |
+| `wsl --install -d <name> --no-launch` | Install from store | New-WSLInstanceFromStore |
+| `wsl --export <name> <path>.tar` | Backup / template | Backup / New-WSLInstanceFromStore |
+| `wsl --import <name> <dir> <tar> --version N` | Create instance | New / Restore |
+| `wsl --unregister <name>` | Remove instance | Remove / Restore / New-WSLInstanceFromStore |
+| `wsl -t <name>` | Stop instance | Remove / Restore |

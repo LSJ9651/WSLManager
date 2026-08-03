@@ -68,6 +68,22 @@ WSLManager\
 | AutoCleanTempDays | 自动清理超过 N 天的临时文件（启动时执行） | 3 |
 | BackupRetentionCount | 每个实例保留的最新备份数量（0 = 不自动清理） | 5 |
 
+## 安全说明
+
+本工具由 PowerShell 脚本（`WSLManager.psm1`，约 950 行）和批处理启动器（`WSLManager.bat`）组成，可能引发用户的合理顾虑，特此说明：
+
+- **无网络操作**：脚本不会访问互联网、不会下载或上传任何数据（仅有 `wsl --install` 通过官方 WSL 命令触发微软商店安装，属系统能力而非脚本联网）
+- **无注册表 / 计划任务 / 服务操作**：脚本不修改任何系统设置
+- **可完全审计**：全部逻辑就 2 个文本文件（共约 970 行），用记事本即可打开查看每一行代码
+- **仅与 WSL 官方接口交互**：对系统唯一的"写入"动作是调用 WSL 官方命令 `wsl --import/--export/--unregister/-t` 来管理发行版，以及在你指定的目录内创建/删除文件
+- **只影响 WSL 发行版和本工具目录**：不会触碰你其他任何文件或程序
+
+### 关于管理员权限
+
+注销、删除 WSL 发行版需要管理员权限，因此工具启动时会自动请求提权。这是 WSL 管理的系统要求，并非工具额外越权——直接使用 `wsl --unregister` 等命令同样需要管理员权限。
+
+> **安全最佳实践**：请始终从本项目官方 GitHub Releases 页面下载 zip 包，避免从不明来源获取他人修改过的版本。
+
 ## 兼容性
 
 - Windows 10（版本 2004+）/ Windows 11
@@ -81,3 +97,11 @@ WSLManager\
 - 备份文件默认保留最新的 5 个，可在配置中调整（设为 0 则不自动清理）
 - 若磁盘可用空间不足 5GB，备份前会发出警告并询问是否继续
 - 配置 `WSLRoot` 后，Repositories/、Instances/、Backups/、Temp/ 会创建在该目录下而非脚本目录
+
+## 开源信息
+
+- **开源许可**：本工具以 MIT 许可证开源，详见项目中的 `LICENSE` 文件
+- **下载与发行**：最新版本及 zip 包发布在 [GitHub Releases](https://github.com/LSJ9651/WSLManager/releases)
+- **项目仓库**：[github.com/LSJ9651/WSLManager](https://github.com/LSJ9651/WSLManager)
+- **反馈建议**：如遇问题或有改进建议，欢迎在 [Issues](https://github.com/LSJ9651/WSLManager/issues) 中提出
+
