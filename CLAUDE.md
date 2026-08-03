@@ -48,7 +48,11 @@ python -c "t=open('<repo>/WSLManager.psm1','rb').read().decode('utf-8-sig');prin
 - **UTF-8 BOM is mandatory**: Without BOM, PS5.1 interprets UTF-8 as the system's ANSI codepage (e.g., GBK), corrupting multi-byte characters.
 
 ### Instance Name Handling
-- Use `wsl -l -q 2>&1 | Where-Object { $_ -match '\S' } | ForEach-Object { $_.Trim() }` to get instance list
+- `wsl -l -q` outputs UTF-16 LE with embedded NUL bytes (`\0`) between characters. PowerShell 5.1's pipeline interprets NULs as line separators, creating spurious empty entries and corrupting instance names. **Always** use this pattern:
+  ```powershell
+  ((wsl -l -q 2>&1 | Out-String) -replace '\0', '') -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+  ```
+  This collapses the UTF-16 stream via `Out-String`, strips NUL chars, splits on newlines, trims whitespace, and filters empty lines.
 - Never use `'^[0-9a-zA-Z_-]+$'` regex — it rejects valid WSL names containing dots or spaces
 
 ### Path Resolution

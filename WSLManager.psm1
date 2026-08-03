@@ -229,8 +229,8 @@ function New-WSLInstanceFromStore {
 
     Write-Host "`n正在安装 '$distroName'，请稍候..." -ForegroundColor Cyan
 
-    # 安装发行版到系统默认位置（直接输出，保留原生进度条）
-    wsl --install -d $distroName
+    # 安装发行版到系统默认位置（--no-launch 防止自动进入 Linux，确保脚本后续流程完整运行）
+    wsl --install -d $distroName --no-launch
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host "`n安装失败，请检查发行版名称是否正确。" -ForegroundColor Red
@@ -266,20 +266,21 @@ function New-WSLInstanceFromStore {
         return
     }
 
-    # 提示用户输入新实例名称
+    # 提示用户输入新实例名称（循环重试，防止名称冲突导致已注销的实例无法恢复）
     Write-Host ""
-    $instanceName = Read-Host "请输入新实例名称（默认: $distroName，直接回车使用默认）"
-    if ([string]::IsNullOrWhiteSpace($instanceName)) {
-        $instanceName = $distroName
-    }
+    do {
+        $instanceName = Read-Host "请输入新实例名称（默认: $distroName，直接回车使用默认）"
+        if ([string]::IsNullOrWhiteSpace($instanceName)) {
+            $instanceName = $distroName
+        }
 
-    # 检查实例名是否已存在
-    $existingInstances = wsl -l -q 2>&1 | Where-Object { $_ -match '\S' } | ForEach-Object { $_.Trim() }
-    if ($instanceName -in $existingInstances) {
-        Write-Host "`n实例名 '$instanceName' 已存在，请选择其他名称。" -ForegroundColor Red
-        Pause-And-Return
-        return
-    }
+        # 检查实例名是否已存在
+        $existingInstances = ((wsl -l -q 2>&1 | Out-String) -replace '\0', '') -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+        if ($instanceName -in $existingInstances) {
+            Write-Host "实例名 '$instanceName' 已存在，请选择其他名称。" -ForegroundColor Yellow
+            $instanceName = $null  # 触发循环重试
+        }
+    } while ([string]::IsNullOrWhiteSpace($instanceName))
 
     # 确保实例目录存在
     $instancesPath = Join-Path (Get-WSLRoot) "Instances\$instanceName"
@@ -327,7 +328,7 @@ function New-WSLInstanceFromRepo {
 
     # 扫描包含 base.tar 的目录
     $availableDistros = @()
-    Get-ChildItem -Path $repositoriesPath -Directory | ForEach-Object {
+    Get-ChildItem -LiteralPath $repositoriesPath -Directory | ForEach-Object {
         $tarPath = Join-Path $_.FullName "base.tar"
         if (Test-Path $tarPath) {
             $availableDistros += [PSCustomObject]@{
@@ -366,18 +367,21 @@ function New-WSLInstanceFromRepo {
     # 自动生成默认实例名
     $dateStr = Get-Date -Format "yyyyMMdd"
     $defaultName = "$($selected.Name)_$dateStr"
-    $instanceName = Read-Host "请输入新实例名称（默认: $defaultName）"
-    if ([string]::IsNullOrWhiteSpace($instanceName)) {
-        $instanceName = $defaultName
-    }
 
-    # 检查实例名是否已存在
-    $existingInstances = wsl -l -q 2>&1 | Where-Object { $_ -match '\S' } | ForEach-Object { $_.Trim() }
-    if ($instanceName -in $existingInstances) {
-        Write-Host "`n实例名 '$instanceName' 已存在，请选择其他名称。" -ForegroundColor Red
-        Pause-And-Return
-        return
-    }
+    Write-Host ""
+    do {
+        $instanceName = Read-Host "请输入新实例名称（默认: $defaultName）"
+        if ([string]::IsNullOrWhiteSpace($instanceName)) {
+            $instanceName = $defaultName
+        }
+
+        # 检查实例名是否已存在
+        $existingInstances = ((wsl -l -q 2>&1 | Out-String) -replace '\0', '') -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+        if ($instanceName -in $existingInstances) {
+            Write-Host "实例名 '$instanceName' 已存在，请选择其他名称。" -ForegroundColor Yellow
+            $instanceName = $null
+        }
+    } while ([string]::IsNullOrWhiteSpace($instanceName))
 
     # 确保实例目录存在
     $instancesPath = Join-Path (Get-WSLRoot) "Instances\$instanceName"
@@ -440,18 +444,20 @@ function New-WSLInstanceFromTar {
     Write-Host ""
     $dateStr = Get-Date -Format "yyyyMMdd"
     $defaultName = "$distroName`_$dateStr"
-    $instanceName = Read-Host "请输入新实例名称（默认: $defaultName）"
-    if ([string]::IsNullOrWhiteSpace($instanceName)) {
-        $instanceName = $defaultName
-    }
 
-    # 检查实例名是否已存在
-    $existingInstances = wsl -l -q 2>&1 | Where-Object { $_ -match '\S' } | ForEach-Object { $_.Trim() }
-    if ($instanceName -in $existingInstances) {
-        Write-Host "`n实例名 '$instanceName' 已存在，请选择其他名称。" -ForegroundColor Red
-        Pause-And-Return
-        return
-    }
+    do {
+        $instanceName = Read-Host "请输入新实例名称（默认: $defaultName）"
+        if ([string]::IsNullOrWhiteSpace($instanceName)) {
+            $instanceName = $defaultName
+        }
+
+        # 检查实例名是否已存在
+        $existingInstances = ((wsl -l -q 2>&1 | Out-String) -replace '\0', '') -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+        if ($instanceName -in $existingInstances) {
+            Write-Host "实例名 '$instanceName' 已存在，请选择其他名称。" -ForegroundColor Yellow
+            $instanceName = $null
+        }
+    } while ([string]::IsNullOrWhiteSpace($instanceName))
 
     # 确保实例目录存在
     $instancesPath = Join-Path (Get-WSLRoot) "Instances\$instanceName"
@@ -484,7 +490,7 @@ function Backup-WSLInstance {
     Write-Host "正在获取已安装的发行版列表..." -ForegroundColor Cyan
 
     # 获取所有已安装实例
-    $instances = wsl -l -q 2>&1 | Where-Object { $_ -match '\S' } | ForEach-Object { $_.Trim() }
+    $instances = ((wsl -l -q 2>&1 | Out-String) -replace '\0', '') -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
 
     if ($instances.Count -eq 0) {
         Write-Host "`n没有发现已安装的 WSL 发行版。" -ForegroundColor Yellow
@@ -518,7 +524,7 @@ function Backup-WSLInstance {
     # 备份前检查备份目录所在驱动器的磁盘空间
     $backupRoot = Join-Path (Get-WSLRoot) "Backups"
     $driveName = [System.IO.Path]::GetPathRoot($backupRoot)
-    $driveInfo = Get-PSDrive -Name $driveName.TrimEnd('\')
+    $driveInfo = Get-PSDrive -Name $driveName.TrimEnd(':\')
     $freeSpace = $driveInfo.Free / 1GB
     if ($freeSpace -lt 5) {
         Write-Host "`n警告：磁盘可用空间不足 5GB（当前约 $([math]::Round($freeSpace, 2))GB），备份可能失败。" -ForegroundColor Yellow
@@ -587,9 +593,9 @@ function Restore-WSLInstance {
     # 收集所有备份文件
     $allBackups = @()
 
-    Get-ChildItem -Path $backupsPath -Directory | ForEach-Object {
+    Get-ChildItem -LiteralPath $backupsPath -Directory | ForEach-Object {
         $instanceName = $_.Name
-        $backups = Get-ChildItem -Path $_.FullName -Filter "*.tar"
+        $backups = Get-ChildItem -LiteralPath $_.FullName -Filter "*.tar"
         foreach ($backup in $backups) {
             $size = $backup.Length
             $allBackups += [PSCustomObject]@{
@@ -609,7 +615,9 @@ function Restore-WSLInstance {
     }
 
     # 按时间降序排列，最新备份优先显示
-    $allBackups = $allBackups | Sort-Object -Property Time -Descending
+    # 使用 @() 强制转为数组：Sort-Object 在只有1个元素时会将数组解包为单个 PSCustomObject，
+    # 导致 .Count 变为 $null，for 循环无法遍历、索引访问失败。
+    $allBackups = @($allBackups | Sort-Object -Property Time -Descending)
 
     Write-Host "`n可用的备份文件：" -ForegroundColor Cyan
     for ($i = 0; $i -lt $allBackups.Count; $i++) {
@@ -678,7 +686,7 @@ function Restore-WSLInstance {
         }
 
         # 检查实例名是否已存在
-        $existingInstances = wsl -l -q 2>&1 | Where-Object { $_ -match '\S' } | ForEach-Object { $_.Trim() }
+        $existingInstances = ((wsl -l -q 2>&1 | Out-String) -replace '\0', '') -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
         if ($newInstanceName -in $existingInstances) {
             Write-Host "`n实例名 '$newInstanceName' 已存在，请选择其他名称。" -ForegroundColor Red
             Pause-And-Return
@@ -721,7 +729,7 @@ function Remove-WSLInstance {
 
     # 获取所有已安装实例
     Write-Host "`n正在获取已安装的发行版列表..." -ForegroundColor Cyan
-    $instances = wsl -l -q 2>&1 | Where-Object { $_ -match '\S' } | ForEach-Object { $_.Trim() }
+    $instances = ((wsl -l -q 2>&1 | Out-String) -replace '\0', '') -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
 
     if ($instances.Count -eq 0) {
         Write-Host "`n没有发现已安装的 WSL 发行版。" -ForegroundColor Yellow
@@ -807,7 +815,7 @@ function Remove-WSLInstance {
     # 步骤 3：删除母版（选项 3, 4）
     if ($cleanupChoice -in "3", "4") {
         # 扫描 Repositories 下所有子目录，模糊匹配实例名对应的母版
-        $repoCandidates = Get-ChildItem -Path (Join-Path $wslRoot "Repositories") -Directory -ErrorAction SilentlyContinue |
+        $repoCandidates = Get-ChildItem -LiteralPath (Join-Path $wslRoot "Repositories") -Directory -ErrorAction SilentlyContinue |
             Where-Object { $targetInstance -like "$($_.Name)*" -or $_.Name -like "$targetInstance*" }
 
         if ($repoCandidates.Count -eq 0) {

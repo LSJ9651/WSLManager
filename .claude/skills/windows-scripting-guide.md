@@ -140,21 +140,28 @@ Always call `Ensure-Directory` (or equivalent) before writing files. Wrapped in 
 ```powershell
 # CORRECT: Check the drive where data will ACTUALLY be written
 $targetDrive = [System.IO.Path]::GetPathRoot($backupDirectory)
-$driveInfo = Get-PSDrive -Name $targetDrive[0]
+$driveInfo = Get-PSDrive -Name $targetDrive.TrimEnd(':\')
 if ($driveInfo.Free -lt 5GB) { Write-Host "Low disk space!" -ForegroundColor Yellow }
 
 # WRONG: Checking system drive when data goes elsewhere
 Get-PSDrive -Name C  # Backup might be on D:\
 ```
 
+Note: `GetPathRoot` returns `C:\` — use `TrimEnd(':\')` to strip the colon-backslash suffix before passing to `Get-PSDrive -Name`.
+
 ---
 
 ## 4. WSL Command Patterns
 
-### 4.1 Instance Listing (Always Trim + Filter)
+### 4.1 Instance Listing (NUL Character Safe)
+
+**Root cause**: `wsl -l -q` outputs UTF-16 LE text. PowerShell 5.1's pipeline interprets the embedded NUL bytes (`\0`) between each character as line separators, creating spurious empty entries and corrupting instance names. The `Out-String` → `-replace '\0'` → `-split` pipeline collapses the UTF-16 stream, strips NULs, and splits on actual newlines.
 
 ```powershell
-# CORRECT — handles empty lines and whitespace
+# CORRECT — handles UTF-16 LE output with NUL characters
+$instances = ((wsl -l -q 2>&1 | Out-String) -replace '\0', '') -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+
+# WRONG (BROKEN) — NUL bytes in UTF-16 LE output cause spurious empty lines and corrupt instance names
 $instances = wsl -l -q 2>&1 | Where-Object { $_ -match '\S' } | ForEach-Object { $_.Trim() }
 
 # WRONG — restrictive regex rejects valid names
@@ -162,7 +169,7 @@ $instances = wsl -l -q | Where-Object { $_ -match '^[0-9a-zA-Z_-]+$' }
 # This rejects names with dots, spaces, Chinese characters, etc.
 ```
 
-Use `-match '\S'` (contains any non-whitespace) to filter out blank lines — WSL allows dots, spaces, and Unicode in instance names.
+WSL allows dots, spaces, and Unicode in instance names. Use the `Out-String` + `-split` pattern — it correctly handles the UTF-16 LE encoding that `wsl.exe` emits.
 
 ### 4.2 Before `wsl --unregister`
 
@@ -182,8 +189,8 @@ if ($LASTEXITCODE -ne 0) {
 ### 4.3 Before `wsl --import`
 
 ```powershell
-# ALWAYS check for name conflicts
-$existing = wsl -l -q 2>&1 | Where-Object { $_ -match '\S' } | ForEach-Object { $_.Trim() }
+# ALWAYS check for name conflicts (using NUL-safe pattern)
+$existing = ((wsl -l -q 2>&1 | Out-String) -replace '\0', '') -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
 if ($existing -contains $newInstanceName) {
     Write-Host "Instance '$newInstanceName' already exists!" -ForegroundColor Yellow
     return
@@ -192,6 +199,20 @@ wsl --import $newInstanceName $installPath $tarPath --version $wslVersion
 ```
 
 This check must be in ALL import paths: from store, from repo, from tar, and from backup restore.
+
+**Post-unregister collision handling**: After `wsl --unregister` (e.g., in `New-WSLInstanceFromStore`), a name collision leaves the user stranded — the original instance is already gone. Use a `do-while` loop for retry instead of a one-shot check + return:
+
+```powershell
+do {
+    $instanceName = Read-Host "Enter instance name"
+    # ... default value handling ...
+    $existing = ((wsl -l -q 2>&1 | Out-String) -replace '\0', '') -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+    if ($instanceName -in $existing) {
+        Write-Host "Name '$instanceName' already exists, choose another." -ForegroundColor Yellow
+        $instanceName = $null  # trigger loop retry
+    }
+} while ([string]::IsNullOrWhiteSpace($instanceName))
+```
 
 ### 4.4 Export → Import Lifecycle for Online Store
 
@@ -368,7 +389,8 @@ Avoid non-ASCII characters inside PowerShell comment blocks (`<# ... #>`) when p
 | Module creates dirs in wrong location | `Split-Path -Parent $PSScriptRoot` goes up one level | Use `$PSScriptRoot` directly |
 | `.bat` fails to launch PowerShell | Used commas instead of semicolons in `-Command` | Use `;` as statement separator |
 | `.bat` path escaping broken | Trailing `\` before `"` creates `\"` escape | Strip with `%VAR:~0,-1%` or use single quotes |
-| Instance not found in list | Restrictive regex rejected valid name | Use `-match '\S'` for filtering |
+| Instance not found in list | Restrictive regex rejected valid name | Use NUL-safe `Out-String` + `-split` pattern from §4.1 |
+| Instance list has blank lines / "illegal characters in path" | `wsl -l -q` UTF-16 LE NUL bytes parsed as line separators | Use `((wsl -l -q 2>&1 \| Out-String) -replace '\0', '') -split '\r?\n'` instead of direct pipeline |
 | Orphan WSL instance after failed delete | Proceeded with file cleanup after unregister failure | Check `$LASTEXITCODE`, abort on failure |
 | Backup fills wrong drive | Checked `$env:SystemDrive` instead of backup drive | Use `[IO.Path]::GetPathRoot($backupDir)` |
 | Instance name collision | Didn't check before `wsl --import` | Always check `wsl -l -q` before importing |
