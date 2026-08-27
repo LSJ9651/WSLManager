@@ -4,10 +4,11 @@ Config/
 Repositories/
 Instances/
 Backups/
-Temp/
+
+Data/
 
 # === Project Docs (local only) ===
-docs/
+# docs/
 
 # === PowerShell ===
 # Generated profile/script files
@@ -32,3 +33,5 @@ $RECYCLE.BIN/
 
 # === Linux ===
 *~
+
+.workbuddy/

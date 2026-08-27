@@ -16,6 +16,6 @@ set "SCRIPT_DIR=%~dp0"
 set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 
 :: ---------- 启动 PowerShell 模块 ----------
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Set-Location '%SCRIPT_DIR%'; Import-Module .\WSLManager.psm1 -Force; Show-Menu"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Set-Location '%SCRIPT_DIR%'; Import-Module .\scripts\WSLManager.psm1 -Force; Show-Menu"
 
 pause

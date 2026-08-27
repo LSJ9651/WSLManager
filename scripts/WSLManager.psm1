@@ -9,8 +9,10 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 
 # ========== 2. 全局变量定义 ==========
 $script:Config = $null
-$script:RootPath = $PSScriptRoot
-$script:ConfigPath = Join-Path $script:RootPath "Config\config.json"
+# 数据统一收纳于工具目录下的 Data\ 文件夹。脚本统一收纳于 scripts\，故工具根为其上一级。
+$script:RootPath = Split-Path -Parent $PSScriptRoot
+$script:DefaultDataRoot = Join-Path $script:RootPath "Data"
+$script:ConfigPath = Join-Path $script:DefaultDataRoot "Config\config.json"
 
 # ========== 3. 配置管理函数 ==========
 
@@ -25,9 +27,12 @@ function Get-WSLConfig {
         return $script:Config
     }
 
-    # 若配置文件不存在，自动创建默认配置
+    # 若配置文件不存在，先迁移旧布局数据（工具根下的数据目录），再自动创建默认配置
     if (-not (Test-Path $script:ConfigPath)) {
-        Initialize-WSLConfig
+        Invoke-DataMigration
+        if (-not (Test-Path $script:ConfigPath)) {
+            Initialize-WSLConfig
+        }
     }
 
     try {
@@ -39,7 +44,6 @@ function Get-WSLConfig {
         $script:Config = [PSCustomObject]@{
             WSLRoot              = ""
             DefaultWSLVersion    = 2
-            AutoCleanTempDays    = 3
             BackupRetentionCount = 5
         }
         # 重建配置文件
@@ -56,13 +60,12 @@ function Get-WSLConfig {
     在 Config 目录下创建默认 config.json
 #>
 function Initialize-WSLConfig {
-    $configDir = Join-Path $script:RootPath "Config"
+    $configDir = Join-Path $script:DefaultDataRoot "Config"
     Ensure-Directory $configDir
 
     $defaultConfig = @{
         WSLRoot              = ""
         DefaultWSLVersion    = 2
-        AutoCleanTempDays    = 3
         BackupRetentionCount = 5
     }
 
@@ -75,7 +78,7 @@ function Initialize-WSLConfig {
 .SYNOPSIS
     获取 WSL 根目录路径
 .DESCRIPTION
-    优先使用 config.json 中 WSLRoot 字段，否则自动使用脚本所在目录
+    优先使用 config.json 中 WSLRoot 字段，否则使用 Data 目录
 #>
 function Get-WSLRoot {
     $config = Get-WSLConfig
@@ -87,12 +90,12 @@ function Get-WSLRoot {
             Ensure-Directory $wslRoot
             return $wslRoot
         } catch {
-            Write-Warning "无法创建自定义根目录 '$wslRoot'，将回退到脚本所在目录。错误: $($_.Exception.Message)"
+            Write-Warning "无法创建自定义根目录 '$wslRoot'，将回退到 Data 目录。错误: $($_.Exception.Message)"
         }
     }
 
-    # 默认回退到脚本所在目录（确保完全可移植）
-    return $script:RootPath
+    # 默认回退到 Data 目录（确保完全可移植）
+    return $script:DefaultDataRoot
 }
 
 <#
@@ -105,6 +108,34 @@ function Ensure-Directory {
     param([string]$path)
     if (-not (Test-Path $path)) {
         New-Item -Path $path -ItemType Directory -Force | Out-Null
+    }
+}
+
+<#
+.SYNOPSIS
+    将旧布局（工具根下的数据目录）迁移进统一的 Data\ 文件夹（幂等，仅默认布局）
+.DESCRIPTION
+    首次在 Data\ 布局下运行时调用：若 Data\Config\config.json 尚不存在，
+    说明仍是旧布局（数据散落在工具根）。将 Config/Repositories/Instances/Backups
+    逐一迁入 Data\。目标统一为 DefaultDataRoot，符合 WSLRoot 留空的场景。
+    任何单项失败均跳过，不阻断启动。
+#>
+function Invoke-DataMigration {
+    $newConfig = Join-Path $script:DefaultDataRoot "Config\config.json"
+    if (Test-Path $newConfig) {
+        return
+    }
+    Ensure-Directory $script:DefaultDataRoot
+    foreach ($name in @("Config", "Repositories", "Instances", "Backups")) {
+        $legacy = Join-Path $script:RootPath $name
+        $dest   = Join-Path $script:DefaultDataRoot $name
+        if ((Test-Path $legacy -PathType Container) -and -not (Test-Path $dest)) {
+            try {
+                Move-Item -LiteralPath $legacy -Destination $dest -ErrorAction Stop
+            } catch {
+                # 迁移失败（如目录被占用），跳过该目录，不阻断启动
+            }
+        }
     }
 }
 
@@ -910,32 +941,6 @@ function Pause-And-Return {
     $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 }
 
-<#
-.SYNOPSIS
-    清理过期临时文件
-.PARAMETER days
-    清理超过指定天数的文件
-#>
-function Clean-TempFiles {
-    param([int]$days = 3)
-
-    $tempPath = Join-Path (Get-WSLRoot) "Temp"
-    if (-not (Test-Path $tempPath)) {
-        return
-    }
-
-    $cutoffDate = (Get-Date).AddDays(-$days)
-    $oldFiles = Get-ChildItem -Path $tempPath -File | Where-Object { $_.LastWriteTime -lt $cutoffDate }
-
-    foreach ($file in $oldFiles) {
-        try {
-            Remove-Item $file.FullName -Force
-        } catch {
-            Write-Warning "无法删除临时文件: $($file.FullName) - $($_.Exception.Message)"
-        }
-    }
-}
-
 # ========== 7. 模块导出 ==========
 Export-ModuleMember -Function Show-Menu
 
@@ -945,9 +950,4 @@ $wslRoot = Get-WSLRoot
 Ensure-Directory (Join-Path $wslRoot "Repositories")
 Ensure-Directory (Join-Path $wslRoot "Instances")
 Ensure-Directory (Join-Path $wslRoot "Backups")
-Ensure-Directory (Join-Path $wslRoot "Temp")
 Ensure-Directory (Join-Path $wslRoot "Config")
-
-# 清理过期临时文件
-$config = Get-WSLConfig
-Clean-TempFiles -days $config.AutoCleanTempDays
