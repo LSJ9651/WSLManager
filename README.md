@@ -222,9 +222,9 @@ TUI（命令行菜单）是早期的交互方式，现作为附属选项保留�
 
 ```
 WSLManager/
-├── WSLManager.bat          ← TUI 启动器（CRLF + UTF-8 无 BOM）
-├── WSLManager.GUI.bat      ← GUI 启动器（CRLF + UTF-8 无 BOM）
-├── scripts/                ← 核心模块（LF + UTF-8 BOM）
+├── WSLManager.bat          ← TUI 启动器
+├── WSLManager.GUI.bat      ← GUI 启动器
+├── scripts/                ← 核心模块
 │   ├── WSLManager.psm1     ← TUI 核心引擎
 │   ├── WSLManager.Engine.psm1  ← GUI/TUI 共用引擎层
 │   └── WSLManager.GUI.ps1  ← WPF 图形界面主程序
@@ -232,7 +232,7 @@ WSLManager/
 │   └── assets/             ← 界面截图与文档资源
 ├── README.md               ← 本文档
 ├── LICENSE                 ← MIT 许可证
-└── Data/                   ← 统一数据目录（gitignore；首次运行自动重建）
+└── Data/                   ← 统一数据目录（首次运行自动重建）
     ├── Config/             ← 用户配置
     │   └── config.json
     ├── Repositories/       ← 母版仓库（每个发行版一个 base.tar）
