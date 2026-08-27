@@ -152,7 +152,7 @@ function Show-Menu {
         Clear-Host
         Write-Host ""
         Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host "    WSL 发行版管理工具 v1.0" -ForegroundColor Cyan
+        Write-Host "    WSL 发行版管理工具 v1.1" -ForegroundColor Cyan
         Write-Host "========================================" -ForegroundColor Cyan
         Write-Host "  1. 列出所有已安装的发行版"
         Write-Host "  2. 新增发行版"
